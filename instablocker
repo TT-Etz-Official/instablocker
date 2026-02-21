@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Instagram Uno-Reverse Feed Filter (Aggressive Anti-Bait Edition)
+// @name         Instagram Uno-Reverse Feed Filter (Full Intercept + Aggressive Bait Filters)
 // @namespace    local
-// @version      3.0.0
-// @description  Intercepts Instagram feed JSON and removes commercial, religious bait, and engagement-farm content before rendering.
+// @version      4.0.0
+// @description  Intercepts IG network responses (fetch + XHR) and strips matched content before UI renders it.
 // @match        https://www.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -11,55 +11,53 @@
 (() => {
   "use strict";
 
-  /**************************************************************
-   * READ THIS BEFORE TOUCHING ANYTHING
+  /***********************************************************************
+   * READ THIS FIRST (PLEASE, I AM BEGGING YOU)
    *
-   * This script intercepts Instagram network responses and
-   * edits the JSON before Instagram renders it.
+   * This script intercepts Instagram's JSON responses and edits them.
+   * That means:
+   *  - you're changing what the app *receives*
+   *  - not just hiding elements after the fact
    *
-   * If you do not understand fetch interception,
-   * do not modify anything except the EXCLUDED list.
+   * If you don't understand fetch/XHR interception and JSON mutation:
+   *  - do not modify anything except EXCLUDED_USERNAMES and maybe regex lists
+   *  - do not "clean up" code you don't understand
    *
-   * Yes it’s aggressive.
-   * No it’s not sorry.
-   **************************************************************/
+   * Humans love touching things and then acting surprised.
+   ***********************************************************************/
 
+  /**********************
+   * DEBUG
+   **********************/
   const DEBUG = false;
+  const log = (...args) => { if (DEBUG) console.log("[IG UNO]", ...args); };
 
-  const log = (...args) => {
-    if (DEBUG) console.log("[IG-UNO]", ...args);
-  };
-
-  /**************************************************************
-   * EXCLUDED USERNAMES (SAFE LIST)
-   **************************************************************/
+  /**********************
+   * SAFE LIST (NEVER FILTER)
+   **********************/
   const EXCLUDED_USERNAMES = new Set([
-    "your_username_here"
-  ].map(x => x.toLowerCase()));
+    "your_username_here",
+  ].map(s => String(s).toLowerCase()));
 
-  function normalize(str) {
-    return String(str || "").toLowerCase();
-  }
+  const normalize = (s) => String(s || "").trim().toLowerCase();
+  const isExcluded = (u) => EXCLUDED_USERNAMES.has(normalize(u));
 
-  function isExcluded(username) {
-    return EXCLUDED_USERNAMES.has(normalize(username));
-  }
+  /**********************
+   * FILTERS
+   * (Keep these targeted at spam/funnels; don't turn it into a word-ban grenade.)
+   **********************/
 
-  /**************************************************************
-   * USERNAME FILTERS
-   **************************************************************/
+  // Username/handle patterns: reliable, low false positives (usually).
   const USERNAME_REGEXES = [
-
-    // official bait
+    // "official" bait
     /(^|[._-])official($|[._-])/i,
     /\bofficial\b/i,
-    /\.ai\b/i,
 
     // domains
     /\.com\b/i,
     /\.io\b/i,
 
-    // commerce
+    // selling / commerce
     /\bmarket\b/i,
     /\bshop\b/i,
     /\bstore\b/i,
@@ -69,29 +67,34 @@
     /\bpromo\b/i,
     /\bsale(s)?\b/i,
     /\bdeal(s)?\b/i,
-    /\bdiscount\b/i,
+    /\bdiscount(s)?\b/i,
+    /\bwholesale\b/i,
     /\bmerch\b/i,
+    /\bproduct(s)?\b/i,
 
-    // crypto / finance
+    // spam verticals
     /\bcrypto\b/i,
     /\bnft\b/i,
     /\bforex\b/i,
-    /\bloan\b/i,
+    /\bcasino\b/i,
+    /\bbet(s|ting)?\b/i,
+    /\bloan(s)?\b/i,
     /\bfinance\b/i,
+    /\binvest(ing|ment)?\b/i,
 
-    // police thirst trap accounts
+    // fake law enforcement thirst/funnel pages
     /\bpolice\b/i,
     /\bcop(s)?\b/i,
     /\bsheriff\b/i,
     /\bdeputy\b/i,
     /\btrooper\b/i,
     /\bpatrol\b/i,
-    /\bthin\s*blue\s*line\b/i
+    /\bbadge\b/i,
+    /\blaw[_-]?enforcement\b/i,
+    /\bthin\s*blue\s*line\b/i,
   ];
 
-  /**************************************************************
-   * RELIGIOUS FILTERS
-   **************************************************************/
+  // Religious bait (caption/hashtags/bio-ish text that appears in feed payloads)
   const RELIGIOUS_REGEXES = [
     /\bchristian\b/i,
     /\bjesus\b/i,
@@ -103,72 +106,189 @@
     /\bgospel\b/i,
     /\bchurch\b/i,
     /\bamen\b/i,
-    /\bchristian(girl|boy)?\b/i
+    /#christian\b/i,
+    /#christiangirl\b/i,
+    /#christianboy\b/i,
   ];
 
-  /**************************************************************
-   * ENGAGEMENT BAIT / FUNNEL LANGUAGE
-   **************************************************************/
+  // General engagement bait / funnel language (caption text)
   const BAIT_REGEXES = [
     /\blink in bio\b/i,
+    /\bcheck (my|the) bio\b/i,
+    /\bclick the link\b/i,
     /\bdm (me|us)\b/i,
+    /\bmessage me\b/i,
     /\bcome find me\b/i,
     /\bwaiting for you\b/i,
-    /\bstay 🥺/i,
     /\bplease stay\b/i,
-    /\bevery time i post i lose followers\b/i,
-    /\bi can't reply to everyone\b/i,
+    /\blose followers\b/i,
+    /\bevery time i post\b/i,
+    /\bi can'?t reply to everyone\b/i,
     /\bjoin my\b/i,
-    /\bsupporters\b/i,
-    /\bexclusive\b/i,
-    /\bcohearts\b/i,
+    /\bsupporters?\b/i,
     /\bcommunity\b/i,
-    /\bsaving my free time\b/i
+    /\bexclusive\b/i,
+    /\bsubscription\b/i,
+    /\bsubscribe\b/i,
   ];
 
-  /**************************************************************
-   * URL FILTER (only touch feed-related endpoints)
-   **************************************************************/
+  // Identity + monetization funnel behavior (targets the *funnel*, not identity existing)
+  // This is intentionally "AND-ish": transition keywords + money/CTA keywords together.
+  const TRANSITION_WORDS = [
+    /\btrans\b/i,
+    /\btransgirl\b/i,
+    /\btranswoman\b/i,
+    /\btrans guy\b/i,
+    /\btransman\b/i,
+    /\bmtf\b/i,
+    /\bftm\b/i,
+    /\bhrt\b/i,
+    /\bestrogen\b/i,
+    /\btestosterone\b/i,
+    /\btop surgery\b/i,
+    /\bbottom surgery\b/i,
+    /\bfacial feminization\b/i,
+    /\bffs\b/i,
+    /\btransition(ing|ed)?\b/i,
+  ];
+
+  const MONEY_CTA_WORDS = [
+    /\blink in bio\b/i,
+    /\bdm (me|us)\b/i,
+    /\bsubscribe\b/i,
+    /\bexclusive\b/i,
+    /\bonlyfans\b/i,
+    /\bof\b/i,
+    /\bpatreon\b/i,
+    /\bgofundme\b/i,
+    /\bdonate\b/i,
+    /\bfund\b/i,
+    /\bcashapp\b/i,
+    /\bvenmo\b/i,
+    /\bpaypal\b/i,
+    /\btips?\b/i,
+  ];
+
+  // Optional: extra funnel patterns common in thirst-bait captions
+  const THIRST_FUNNEL_REGEXES = [
+    /\bbefore (and|&) after\b/i,
+    /\bglow up\b/i,
+    /\bmy (journey|story)\b/i,
+    /\bi'?m just a (girl|boy)\b/i,
+    /\bstay\b.*🥺/i,
+  ];
+
+  function matchesAny(text, regexes) {
+    const t = String(text || "");
+    return regexes.some(rx => rx.test(t));
+  }
+
+  function matchesTransitionFunnel(captionText) {
+    const t = String(captionText || "");
+    const hasTransition = TRANSITION_WORDS.some(rx => rx.test(t));
+    if (!hasTransition) return false;
+
+    const hasMoneyCta = MONEY_CTA_WORDS.some(rx => rx.test(t));
+    if (!hasMoneyCta) return false;
+
+    // If both are present, we treat it as funnel bait.
+    return true;
+  }
+
+  /**********************
+   * URL / ENDPOINT INTERCEPT
+   **********************/
   const URL_ALLOWLIST = [
     "/graphql/query",
+    "/graphql/",
     "/api/",
-    "/api/v1/"
+    "/api/v1/",
+    "/api/v1/feed/",
+    "/api/v1/discover/",
   ];
 
-  function shouldIntercept(url) {
+  function shouldProcessUrl(url) {
     try {
       const u = new URL(url, location.href);
-      return URL_ALLOWLIST.some(p => u.pathname.includes(p));
+      return URL_ALLOWLIST.some(part => u.pathname.includes(part));
     } catch {
-      return URL_ALLOWLIST.some(p => String(url).includes(p));
+      return URL_ALLOWLIST.some(part => String(url).includes(part));
     }
   }
 
-  /**************************************************************
-   * MATCH LOGIC
-   **************************************************************/
-  function matchesAny(text, regexes) {
-    const t = normalize(text);
-    return regexes.some(r => r.test(t));
+  /**********************
+   * OWNER / USERNAME EXTRACTION (FALLBACK HEURISTICS)
+   **********************/
+  function extractPossibleUsername(obj) {
+    if (!obj || typeof obj !== "object") return null;
+
+    // common
+    if (typeof obj.username === "string") return obj.username;
+
+    // ig-ish
+    if (obj.user && typeof obj.user.username === "string") return obj.user.username;
+    if (obj.owner && typeof obj.owner.username === "string") return obj.owner.username;
+    if (obj.author && typeof obj.author.username === "string") return obj.author.username;
+
+    // graphql-ish
+    if (obj.node && typeof obj.node.username === "string") return obj.node.username;
+    if (obj.user && obj.user.user && typeof obj.user.user.username === "string") return obj.user.user.username;
+
+    // reels/media shapes sometimes bury it
+    if (obj.user && obj.user.reel && typeof obj.user.reel.username === "string") return obj.user.reel.username;
+
+    return null;
   }
 
-  function shouldRemove(username, caption) {
+  function extractPossibleCaption(obj) {
+    if (!obj || typeof obj !== "object") return null;
 
+    // common/simple
+    if (obj.caption && typeof obj.caption.text === "string") return obj.caption.text;
+
+    // graphql caption edges
+    const edgeText = obj.edge_media_to_caption?.edges?.[0]?.node?.text;
+    if (typeof edgeText === "string") return edgeText;
+
+    // sometimes nested
+    if (obj.post && obj.post.caption && typeof obj.post.caption.text === "string") return obj.post.caption.text;
+
+    // last resort: some payloads include "text" fields directly (dangerous, but useful)
+    if (typeof obj.text === "string" && obj.text.length < 5000) return obj.text;
+
+    return null;
+  }
+
+  /**********************
+   * DECISION: SHOULD REMOVE THIS ITEM?
+   **********************/
+  function shouldRemoveBySignals(username, caption) {
     if (!username) return false;
     if (isExcluded(username)) return false;
 
+    // handle patterns
     if (matchesAny(username, USERNAME_REGEXES)) return true;
 
+    // caption patterns
     if (matchesAny(caption, RELIGIOUS_REGEXES)) return true;
-
     if (matchesAny(caption, BAIT_REGEXES)) return true;
+    if (matchesAny(caption, THIRST_FUNNEL_REGEXES)) return true;
+
+    // transition monetization funnel (requires both)
+    if (matchesTransitionFunnel(caption)) return true;
 
     return false;
   }
 
-  /**************************************************************
-   * JSON SCRUBBER
-   **************************************************************/
+  /**********************
+   * GENERIC JSON SCRUBBER (RECURSIVE)
+   *
+   * Strategy:
+   *  - walk everything
+   *  - if we see arrays, filter items whose "owner" matches
+   *  - also look at caption text when present
+   *  - avoid infinite loops via WeakSet
+   **********************/
   function scrubJson(data) {
     const seen = new WeakSet();
 
@@ -178,32 +298,32 @@
       seen.add(node);
 
       if (Array.isArray(node)) {
-        const cleaned = [];
+        const out = [];
         for (const item of node) {
+          const username = extractPossibleUsername(item);
+          const caption = extractPossibleCaption(item);
 
-          const username =
-            item?.user?.username ||
-            item?.owner?.username ||
-            item?.author?.username ||
-            item?.post?.user?.username;
-
-          const caption =
-            item?.caption?.text ||
-            item?.edge_media_to_caption?.edges?.[0]?.node?.text ||
-            item?.post?.caption?.text;
-
-          if (shouldRemove(username, caption)) {
-            log("Removed:", username);
+          if (username && shouldRemoveBySignals(username, caption)) {
+            log("Yeeted array item from:", username);
             continue;
           }
 
-          cleaned.push(walk(item));
+          out.push(walk(item));
         }
-        return cleaned;
+        return out;
       }
 
-      for (const k in node) {
+      // Walk object properties
+      for (const k of Object.keys(node)) {
         node[k] = walk(node[k]);
+      }
+
+      // If this object *itself* looks like content owned by a matched username, null it out.
+      const username = extractPossibleUsername(node);
+      const caption = extractPossibleCaption(node);
+      if (username && shouldRemoveBySignals(username, caption)) {
+        log("Neutered object owned by:", username);
+        return null;
       }
 
       return node;
@@ -212,46 +332,117 @@
     return walk(data);
   }
 
-  /**************************************************************
+  /**********************
    * FETCH INTERCEPT
-   **************************************************************/
+   **********************/
   const realFetch = window.fetch;
 
   window.fetch = async function(input, init) {
     const url = typeof input === "string" ? input : (input && input.url) || "";
 
-    if (!shouldIntercept(url)) {
+    if (!shouldProcessUrl(url)) {
       return realFetch.apply(this, arguments);
     }
 
-    const response = await realFetch.apply(this, arguments);
+    const resp = await realFetch.apply(this, arguments);
 
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      return response;
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.includes("application/json") && !ct.includes("text/javascript")) {
+      return resp;
     }
 
     try {
-      const clone = response.clone();
-      const text = await clone.text();
-      const json = JSON.parse(text);
+      const cloned = resp.clone();
+      const text = await cloned.text();
 
-      const cleaned = scrubJson(json);
-      const newBody = JSON.stringify(cleaned);
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return resp;
+      }
 
-      log("Filtered response:", url);
+      const scrubbed = scrubJson(json);
+      const newBody = JSON.stringify(scrubbed);
+
+      log("Filtered fetch response:", url);
 
       return new Response(newBody, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: resp.headers,
       });
-
     } catch (e) {
-      log("Filter error:", e);
-      return response;
+      log("Fetch filter error; returning original:", e);
+      return resp;
     }
   };
 
-  log("Instagram Anti-Bait Filter Loaded.");
+  /**********************
+   * XHR INTERCEPT (FALLBACK)
+   **********************/
+  const RealXHR = window.XMLHttpRequest;
+
+  function PatchedXHR() {
+    const xhr = new RealXHR();
+    let requestUrl = "";
+
+    const realOpen = xhr.open;
+    xhr.open = function(method, url) {
+      requestUrl = url || "";
+      return realOpen.apply(this, arguments);
+    };
+
+    const realSend = xhr.send;
+    xhr.send = function() {
+      if (!shouldProcessUrl(requestUrl)) {
+        return realSend.apply(this, arguments);
+      }
+
+      const origOnReady = xhr.onreadystatechange;
+
+      xhr.onreadystatechange = function() {
+        try {
+          if (xhr.readyState === 4) {
+            const ct = xhr.getResponseHeader("content-type") || "";
+            if (ct.includes("application/json") || ct.includes("text/javascript")) {
+              let json;
+              try {
+                json = JSON.parse(xhr.responseText);
+              } catch {
+                json = null;
+              }
+
+              if (json) {
+                const scrubbed = scrubJson(json);
+                const newTxt = JSON.stringify(scrubbed);
+
+                // Best-effort patching: some browsers lock these down, but often it works.
+                try {
+                  Object.defineProperty(xhr, "responseText", { get: () => newTxt });
+                } catch {}
+                try {
+                  Object.defineProperty(xhr, "response", { get: () => newTxt });
+                } catch {}
+
+                log("Filtered XHR response:", requestUrl);
+              }
+            }
+          }
+        } catch (e) {
+          log("XHR filter error:", e);
+        }
+
+        if (origOnReady) return origOnReady.apply(this, arguments);
+      };
+
+      return realSend.apply(this, arguments);
+    };
+
+    return xhr;
+  }
+
+  window.XMLHttpRequest = PatchedXHR;
+
+  log("Loaded. Instagram will now receive a slightly less cursed reality.");
 })();
