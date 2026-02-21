@@ -1,152 +1,95 @@
-# Instagram Uno Reverse Filter
+# 🎭 Uno-Reverse Feed Filters for Instagram & Bluesky
 
-Because the modern feed is a landfill and I got tired of manually blocking AI-generated police thirst traps, dropshipping empires, crypto prophets, and “_official” accounts that were born yesterday.
+A pair of *ruthlessly judgmental* userscripts that intercept social media feeds and delete content from accounts that are clearly not here for personal vibes (we see you *marketofficial.io policegirl69*). Designed for posting to GitHub so others can benefit from your displeasure with AI spam, brand funnels, and general nonsense.
 
-This userscript intercepts Instagram’s network responses and removes unwanted accounts **before the UI ever sees them**. They simply never existed. ✨
+These work by injecting into the browser and filtering *before* the social apps ever get a chance to show you garbage. If you don’t understand what XHR/fetch interception is, don’t touch this — the code bites if you poke it with a stick.
 
-## 📦 How to Install
+## 📦 What You’re Getting
 
-### 🧠 What You’re Installing
+### 🧨 Instagram Uno-Reverse Filter
 
-Tampermonkey is a userscript manager extension that lets your browser run custom scripts like this one. You’ll need it before you can use the block-filter script below. ([Tampermonkey][1])
+Intercepts Instagram’s network responses and strips out posts from:
 
----
+* commercial handles (.com / .io / shop / market / etc.)
+* “official” accounts (except `zoeykl_official`, of course)
+* AI-generated police/law enforcement thirst traps
 
-### 🔵 Google Chrome
+… before the page UI ever sees them.
 
-1. Open Chrome.
-2. Visit the **Tampermonkey extension page** on the Chrome Web Store. ([Chrome Web Store][2])
-3. Click **“Add to Chrome”** and confirm.
-4. Once installed, a Tampermonkey icon will appear to the right of the address bar.
-5. Click that icon, open **Dashboard**, then **Add new script**.
-6. Paste your userscript code into the editor and save.
+### 🔫 Bluesky Uno-Reverse Filter
 
----
+Does the same for Bluesky XRPC feed JSON — surgically removing posts based on similar handle and post text heuristics.
 
-### 🌀 Opera
-
-1. Open Opera.
-2. Search for **Tampermonkey in the Opera Add-ons store** (or go via Tampermonkey.net). ([Opera add-ons][3])
-3. Click **“Add to Opera”** and confirm installation.
-4. After installation, the Tampermonkey icon will appear near the address bar.
-5. Open the Dashboard, add a new script, and paste your code.
-
-> *Note:* On some versions of Opera, installing the “Chrome Extensions” add-on first can make installing Chrome extensions (including Tampermonkey) easier. ([openuserjs.org][4])
+Both scripts are elegantly hostile towards spam and proud of it.
 
 ---
 
-### 🦊 Mozilla Firefox
+## 📌 Installation (for Mere Mortals)
 
-1. Open Firefox.
-2. Go to the **Tampermonkey add-on page for Firefox** and click **“Add to Firefox”**. ([Mozilla Add-ons][5])
-3. Approve the extension permissions.
-4. See the Tampermonkey icon appear in your toolbar.
-5. Click it, choose **Dashboard**, then **Add new script**.
-6. Paste your userscript code and save.
+You need **Tampermonkey**, the world’s most popular userscript manager, before these scripts can do their thing. It’s available for all major browsers (Chrome, Firefox, Edge, Opera, Safari), and it lets you run custom JavaScript on webpages. ([Tampermonkey][1])
 
----
+Follow the steps for your preferred browser:
 
-### 🧠 After Installation
+### 🧠 1. Install Tampermonkey
 
-Once Tampermonkey is installed and your script is saved:
+**Chrome**
 
-* Ensure the script is **enabled** in the Tampermonkey dashboard.
-* Visit Instagram in the same browser — the script will begin working automatically.
-* You can return to the dashboard to **edit, disable, or remove** the script any time.
+1. Go to the Chrome Web Store.
+2. Search for *Tampermonkey* or install directly from the store page.
+3. Click **Add to Chrome → Add Extension**. ([Chrome Web Store][2])
 
-[1]: https://www.tampermonkey.net/?utm_source=chatgpt.com "Tampermonkey: Home"
-[2]: https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en&utm_source=chatgpt.com "Tampermonkey - Chrome Web Store"
-[3]: https://addons.opera.com/en/extensions/details/tampermonkey-beta/?utm_source=chatgpt.com "Tampermonkey extension - Opera add-ons"
-[4]: https://openuserjs.org/about/Tampermonkey-for-Opera?utm_source=chatgpt.com "About / Tampermonkey for Opera"
-[5]: https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/?utm_source=chatgpt.com "Tampermonkey – Get this Extension for Firefox (en-US)"
+**Firefox**
 
+1. Open Firefox Add-ons.
+2. Search for *Tampermonkey*.
+3. Click **Add to Firefox → Install**. ([Mozilla Add-ons][3])
 
----
+**Microsoft Edge**
 
-## What This Does
+1. Visit the Extensions panel in Edge.
+2. Search for *Tampermonkey*.
+3. Click **Get → Add Extension**. (Yes, it works in Edge too.) ([Tampermonkey][1])
 
-* Hooks `window.fetch`
-* Hooks `XMLHttpRequest`
-* Intercepts Instagram JSON responses
-* Recursively walks the data tree
-* Deletes any object owned by a username matching configured patterns
-* Returns a surgically altered response back to Instagram
+**Opera**
 
-Instagram sends you content.
-The script looks at it.
-The script decides it’s garbage.
-Instagram never gets it back.
+1. Open the Opera add-ons store.
+2. Install the *Tampermonkey Beta* extension.
+3. Enable it in your toolbar. ([Opera add-ons][4])
 
-Uno reverse.
+**Safari**
+
+1. On macOS, install Tampermonkey from its official site or extension gallery.
+2. If your Safari version is recent, extension support might be limited — check Apple’s documentation. ([GitHub][5])
 
 ---
 
-## What This Is Not
+## ✨ Installing the Script
 
-* It is not a packet firewall.
-* It does not “reject packets” at the TCP layer.
-* It does not send angry data back to Meta HQ.
-* It does not violate your login session.
-* It does not magically change the algorithm.
+1. After Tampermonkey is installed, click its icon in your browser toolbar.
+2. Select **Dashboard → Utilities → Import from URL**.
+3. Paste the raw URL of this script from GitHub.
+4. Click **Install**.
+5. Refresh the social site tab and enjoy the garbage disappearing.
 
-It simply edits the response in your browser before Instagram consumes it.
-
-If you do not understand how monkeypatching `fetch()` works, do not modify this script.
-
-If you do not understand recursive JSON mutation, do not modify this script.
-
-If your first instinct is to “clean up unused parts,” resist that instinct.
+> Tampermonkey will show you warnings about permissions — that’s expected. You’re only allowing it to run these scripts.
 
 ---
 
-## Why It Exists
+## 🛠️ How It Works
 
-Because:
+We intercept network calls (like `fetch` and XHR) **before** Instagram or Bluesky gets the data. Then we:
 
-* Every third account is `_official`
-* Everyone has a `.io`
-* Every cop thirst trap is AI-generated
-* Dropshipping never dies
-* Crypto refuses to remain buried
+* look at usernames or post content
+* match them against patterns like `market`, `.io`, `official`, `police`, etc.
+* remove anything that “looks like spam” so you never see it
 
-And I value my sanity.
+If you don’t know how this works — that’s fine — don’t fiddle with the code. If you do know how it works… good. You’re the danger.
 
 ---
 
-## What It Filters By Default
+## ⚠️ Who Should *Not* Modify This
 
-The script aggressively targets usernames containing:
-
-* `official`
-* `.com`
-* `.io`
-* `market`, `shop`, `store`, `promo`, `brand`
-* `crypto`, `forex`, `bet`, `casino`
-* Corporate suffixes like `LLC`, `Inc`
-* Police/law enforcement bait keywords (`police`, `cop`, `sheriff`, `trooper`, etc.)
-
-It excludes `your_username_here`.
-
-Yes, intentionally. No, don’t remove it unless you enjoy self-inflicted chaos.
-
----
-
-## Stability Notes
-
-Instagram changes its internal API structure regularly.
-
-If:
-
-* Your feed stops loading
-* Things appear blank
-* Infinite scroll gets weird
-
-Turn on `DEBUG = true` in the script and observe what’s being removed.
-
-This script is aggressive by design. You can dial it back. I won’t.
-
----
-
-## Disclaimer
-
-This script modifies client-side responses only. It just refuses to display nonsense.
+* People who “just wanted to tweak one line”
+* People who think regex is a Pokémon
+* People who think `= != =` is valid JavaScript
+* Everyone except the author and reluctantly… you
