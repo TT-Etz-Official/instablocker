@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Instagram Feed Uno-Reverse Filter (fetch/XHR interception)
+// @name         Instagram Uno-Reverse Feed Filter (Aggressive Anti-Bait Edition)
 // @namespace    local
-// @version      2.1.0
-// @description  Intercepts Instagram JSON responses and strips garbage accounts before the UI ever sees them.
+// @version      3.0.0
+// @description  Intercepts Instagram feed JSON and removes commercial, religious bait, and engagement-farm content before rendering.
 // @match        https://www.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -11,49 +11,54 @@
 (() => {
   "use strict";
 
-  /***********************************************************************
-   *  READ THIS BEFORE YOU TOUCH ANYTHING.
+  /**************************************************************
+   * READ THIS BEFORE TOUCHING ANYTHING
    *
-   *  This script intercepts Instagram’s network responses and surgically
-   *  removes posts from accounts that match certain patterns.
+   * This script intercepts Instagram network responses and
+   * edits the JSON before Instagram renders it.
    *
-   *  If you do not understand:
-   *    - fetch interception
-   *    - XHR monkeypatching
-   *    - recursive JSON mutation
+   * If you do not understand fetch interception,
+   * do not modify anything except the EXCLUDED list.
    *
-   *  Then DO NOT MODIFY THIS.
-   *
-   *  I am not responsible for what happens if you randomly delete
-   *  something because you "thought it looked unnecessary".
-   *
-   *  You have been warned.
-   ***********************************************************************/
+   * Yes it’s aggressive.
+   * No it’s not sorry.
+   **************************************************************/
 
-  /**********************
-   * SETTINGS
-   **********************/
+  const DEBUG = false;
 
-  // Accounts we absolutely do NOT touch.
-  // If you remove yourself from this list and block yourself,
-  // that’s between you and the universe.
-  const EXCLUDED_USERNAMES = new Set(
-    ["your_insta_handle_here"].map(s => s.toLowerCase())
-  );
+  const log = (...args) => {
+    if (DEBUG) console.log("[IG-UNO]", ...args);
+  };
 
-  // Patterns that trigger content deletion.
-  // Yes, this is aggressive.
-  // No, I do not care about your dropshipping hustle.
+  /**************************************************************
+   * EXCLUDED USERNAMES (SAFE LIST)
+   **************************************************************/
+  const EXCLUDED_USERNAMES = new Set([
+    "zoeykl_official"
+  ].map(x => x.toLowerCase()));
+
+  function normalize(str) {
+    return String(str || "").toLowerCase();
+  }
+
+  function isExcluded(username) {
+    return EXCLUDED_USERNAMES.has(normalize(username));
+  }
+
+  /**************************************************************
+   * USERNAME FILTERS
+   **************************************************************/
   const USERNAME_REGEXES = [
-    // “official” nonsense
+
+    // official bait
     /(^|[._-])official($|[._-])/i,
     /\bofficial\b/i,
 
-    // Domain bait
+    // domains
     /\.com\b/i,
     /\.io\b/i,
 
-    // Commerce sludge
+    // commerce
     /\bmarket\b/i,
     /\bshop\b/i,
     /\bstore\b/i,
@@ -61,95 +66,110 @@
     /\bboutique\b/i,
     /\bbrand\b/i,
     /\bpromo\b/i,
-    /\bsales?\b/i,
-    /\bdeals?\b/i,
-    /\bdiscounts?\b/i,
-    /\bwholesale\b/i,
+    /\bsale(s)?\b/i,
+    /\bdeal(s)?\b/i,
+    /\bdiscount\b/i,
     /\bmerch\b/i,
-    /\bproducts?\b/i,
 
-    // Corporate cosplay
-    /\b(inc|llc|ltd|gmbh|co)\b/i,
-
-    // Financial spam
+    // crypto / finance
     /\bcrypto\b/i,
     /\bnft\b/i,
     /\bforex\b/i,
-    /\bbet(s|ting)?\b/i,
-    /\bcasino\b/i,
-    /\bloan(s)?\b/i,
+    /\bloan\b/i,
     /\bfinance\b/i,
-    /\binvest(ing|ment)?\b/i,
 
-    // AI cop thirst trap industrial complex
+    // police thirst trap accounts
     /\bpolice\b/i,
     /\bcop(s)?\b/i,
     /\bsheriff\b/i,
     /\bdeputy\b/i,
     /\btrooper\b/i,
     /\bpatrol\b/i,
-    /\bbadge\b/i,
-    /\blaw[_-]?enforcement\b/i,
-    /\bthin\s*blue\s*line\b/i,
+    /\bthin\s*blue\s*line\b/i
   ];
 
-  // We don’t intercept literally everything,
-  // because chaos has limits.
+  /**************************************************************
+   * RELIGIOUS FILTERS
+   **************************************************************/
+  const RELIGIOUS_REGEXES = [
+    /\bchristian\b/i,
+    /\bjesus\b/i,
+    /\bgod\b/i,
+    /\bblessed\b/i,
+    /\bbible\b/i,
+    /\bfaith\b/i,
+    /\bprayer\b/i,
+    /\bgospel\b/i,
+    /\bchurch\b/i,
+    /\bamen\b/i,
+    /\bchristian(girl|boy)?\b/i
+  ];
+
+  /**************************************************************
+   * ENGAGEMENT BAIT / FUNNEL LANGUAGE
+   **************************************************************/
+  const BAIT_REGEXES = [
+    /\blink in bio\b/i,
+    /\bdm (me|us)\b/i,
+    /\bcome find me\b/i,
+    /\bwaiting for you\b/i,
+    /\bstay 🥺/i,
+    /\bplease stay\b/i,
+    /\bevery time i post i lose followers\b/i,
+    /\bi can't reply to everyone\b/i,
+    /\bjoin my\b/i,
+    /\bsupporters\b/i,
+    /\bexclusive\b/i,
+    /\bcohearts\b/i,
+    /\bcommunity\b/i,
+    /\bsaving my free time\b/i
+  ];
+
+  /**************************************************************
+   * URL FILTER (only touch feed-related endpoints)
+   **************************************************************/
   const URL_ALLOWLIST = [
     "/graphql/query",
     "/api/",
-    "/api/v1/",
+    "/api/v1/"
   ];
 
-  // Set to true if you want console logs explaining what’s being obliterated.
-  const DEBUG = false;
-
-  const log = (...args) => {
-    if (DEBUG) console.log("[IG UnoReverse]", ...args);
-  };
-
-  function isExcluded(username) {
-    return EXCLUDED_USERNAMES.has((username || "").toLowerCase());
-  }
-
-  function usernameMatches(username) {
-    if (!username) return false;
-    if (isExcluded(username)) return false;
-    return USERNAME_REGEXES.some(rx => rx.test(username));
-  }
-
-  function shouldProcessUrl(url) {
+  function shouldIntercept(url) {
     try {
       const u = new URL(url, location.href);
-      return URL_ALLOWLIST.some(part => u.pathname.includes(part));
+      return URL_ALLOWLIST.some(p => u.pathname.includes(p));
     } catch {
-      return URL_ALLOWLIST.some(part => String(url).includes(part));
+      return URL_ALLOWLIST.some(p => String(url).includes(p));
     }
   }
 
-  /***********************************************************************
+  /**************************************************************
+   * MATCH LOGIC
+   **************************************************************/
+  function matchesAny(text, regexes) {
+    const t = normalize(text);
+    return regexes.some(r => r.test(t));
+  }
+
+  function shouldRemove(username, caption) {
+
+    if (!username) return false;
+    if (isExcluded(username)) return false;
+
+    if (matchesAny(username, USERNAME_REGEXES)) return true;
+
+    if (matchesAny(caption, RELIGIOUS_REGEXES)) return true;
+
+    if (matchesAny(caption, BAIT_REGEXES)) return true;
+
+    return false;
+  }
+
+  /**************************************************************
    * JSON SCRUBBER
-   *
-   * This walks the entire JSON response tree and removes anything owned
-   * by a username that matches our patterns.
-   *
-   * Yes, recursively.
-   * Yes, it’s invasive.
-   * No, Instagram did not ask for consent.
-   ***********************************************************************/
+   **************************************************************/
   function scrubJson(data) {
     const seen = new WeakSet();
-
-    function getOwnerUsername(obj) {
-      if (!obj || typeof obj !== "object") return null;
-
-      if (typeof obj.username === "string") return obj.username;
-      if (obj.user && typeof obj.user.username === "string") return obj.user.username;
-      if (obj.owner && typeof obj.owner.username === "string") return obj.owner.username;
-      if (obj.author && typeof obj.author.username === "string") return obj.author.username;
-
-      return null;
-    }
 
     function walk(node) {
       if (!node || typeof node !== "object") return node;
@@ -157,26 +177,32 @@
       seen.add(node);
 
       if (Array.isArray(node)) {
-        const out = [];
+        const cleaned = [];
         for (const item of node) {
-          const owner = getOwnerUsername(item);
-          if (owner && usernameMatches(owner)) {
-            log("Deleted content from:", owner);
-            continue; // yeet
+
+          const username =
+            item?.user?.username ||
+            item?.owner?.username ||
+            item?.author?.username ||
+            item?.post?.user?.username;
+
+          const caption =
+            item?.caption?.text ||
+            item?.edge_media_to_caption?.edges?.[0]?.node?.text ||
+            item?.post?.caption?.text;
+
+          if (shouldRemove(username, caption)) {
+            log("Removed:", username);
+            continue;
           }
-          out.push(walk(item));
+
+          cleaned.push(walk(item));
         }
-        return out;
+        return cleaned;
       }
 
-      for (const k of Object.keys(node)) {
+      for (const k in node) {
         node[k] = walk(node[k]);
-      }
-
-      const owner = getOwnerUsername(node);
-      if (owner && usernameMatches(owner)) {
-        log("Neutered object owned by:", owner);
-        return null;
       }
 
       return node;
@@ -185,130 +211,46 @@
     return walk(data);
   }
 
-  /***********************************************************************
-   * FETCH INTERCEPTION
-   *
-   * We override window.fetch BEFORE Instagram fully boots.
-   * This is where the magic happens.
-   *
-   * If you don’t understand this section,
-   * do not “optimize” it.
-   ***********************************************************************/
+  /**************************************************************
+   * FETCH INTERCEPT
+   **************************************************************/
   const realFetch = window.fetch;
 
   window.fetch = async function(input, init) {
-    const url = typeof input === "string"
-      ? input
-      : (input && input.url) || "";
+    const url = typeof input === "string" ? input : (input && input.url) || "";
 
-    if (!shouldProcessUrl(url)) {
+    if (!shouldIntercept(url)) {
       return realFetch.apply(this, arguments);
     }
 
-    const resp = await realFetch.apply(this, arguments);
+    const response = await realFetch.apply(this, arguments);
 
-    const contentType = resp.headers.get("content-type") || "";
-    if (!contentType.includes("application/json") &&
-        !contentType.includes("text/javascript")) {
-      return resp;
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return response;
     }
 
     try {
-      const cloned = resp.clone();
-      const text = await cloned.text();
+      const clone = response.clone();
+      const text = await clone.text();
+      const json = JSON.parse(text);
 
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        return resp; // Not JSON? Not our problem.
-      }
+      const cleaned = scrubJson(json);
+      const newBody = JSON.stringify(cleaned);
 
-      const scrubbed = scrubJson(json);
-      const newBody = JSON.stringify(scrubbed);
-
-      log("Filtered response for:", url);
+      log("Filtered response:", url);
 
       return new Response(newBody, {
-        status: resp.status,
-        statusText: resp.statusText,
-        headers: resp.headers,
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
       });
 
     } catch (e) {
-      log("Filter error. Returning original response.", e);
-      return resp;
+      log("Filter error:", e);
+      return response;
     }
   };
 
-  /***********************************************************************
-   * XHR INTERCEPTION (Fallback)
-   *
-   * Because sometimes fetch isn’t enough.
-   * And we do not trust Instagram to behave consistently.
-   ***********************************************************************/
-  const RealXHR = window.XMLHttpRequest;
-
-  function PatchedXHR() {
-    const xhr = new RealXHR();
-    let requestUrl = "";
-
-    const realOpen = xhr.open;
-    xhr.open = function(method, url) {
-      requestUrl = url || "";
-      return realOpen.apply(this, arguments);
-    };
-
-    const realSend = xhr.send;
-    xhr.send = function() {
-
-      if (!shouldProcessUrl(requestUrl)) {
-        return realSend.apply(this, arguments);
-      }
-
-      const origOnReady = xhr.onreadystatechange;
-
-      xhr.onreadystatechange = function() {
-        try {
-          if (xhr.readyState === 4) {
-            const ct = xhr.getResponseHeader("content-type") || "";
-            if (ct.includes("application/json") ||
-                ct.includes("text/javascript")) {
-
-              let json;
-              try {
-                json = JSON.parse(xhr.responseText);
-              } catch {}
-
-              if (json) {
-                const scrubbed = scrubJson(json);
-                const newTxt = JSON.stringify(scrubbed);
-
-                Object.defineProperty(xhr, "responseText", {
-                  get: () => newTxt
-                });
-                Object.defineProperty(xhr, "response", {
-                  get: () => newTxt
-                });
-
-                log("Filtered XHR response for:", requestUrl);
-              }
-            }
-          }
-        } catch (e) {
-          log("XHR filter error:", e);
-        }
-
-        if (origOnReady) return origOnReady.apply(this, arguments);
-      };
-
-      return realSend.apply(this, arguments);
-    };
-
-    return xhr;
-  }
-
-  window.XMLHttpRequest = PatchedXHR;
-
-  log("Uno Reverse loaded. Humanity remains disappointing.");
+  log("Instagram Anti-Bait Filter Loaded.");
 })();
