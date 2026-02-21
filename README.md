@@ -11,7 +11,7 @@ These work by injecting into the browser and filtering *before* the social apps 
 Intercepts Instagram’s network responses and strips out posts from:
 
 * commercial handles (.com / .io / shop / market / etc.)
-* “official” accounts (except `your_username_here`, of course)
+* “official” accounts (except `zoeykl_official`, of course)
 * AI-generated police/law enforcement thirst traps
 
 … before the page UI ever sees them.
@@ -93,3 +93,9 @@ If you don’t know how this works — that’s fine — don’t fiddle with the
 * People who think regex is a Pokémon
 * People who think `= != =` is valid JavaScript
 * Everyone except the author and reluctantly… you
+
+[1]: https://www.tampermonkey.net/?utm_source=chatgpt.com "Tampermonkey: Home"
+[2]: https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en&utm_source=chatgpt.com "Tampermonkey - Chrome Web Store"
+[3]: https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/?utm_source=chatgpt.com "Tampermonkey – Get this Extension for Firefox (en-US)"
+[4]: https://addons.opera.com/en/extensions/details/tampermonkey-beta/?utm_source=chatgpt.com "Tampermonkey extension"
+[5]: https://github.com/OpenUserJs/OpenUserJS.org/wiki/Tampermonkey-for-Safari?utm_source=chatgpt.com "Tampermonkey for Safari"
