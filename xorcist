@@ -1,0 +1,502 @@
+// ==UserScript==
+// @name         X Uno-Reverse Feed Filter (Full Intercept + Aggressive Bait Filters)
+// @namespace    local
+// @version      1.0.0
+// @description  Intercepts X/Twitter timeline JSON (fetch + XHR) and removes matched content before the UI can render it.
+// @match        https://x.com/*
+// @match        https://twitter.com/*
+// @run-at       document-start
+// @grant        none
+// ==/UserScript==
+
+(() => {
+  "use strict";
+
+  /***********************************************************************
+   * This script edits X's JSON responses in-flight.
+   * That means you're changing what the app receives, not just hiding UI.
+   *
+   * If you don't understand fetch/XHR interception, do not mess with the
+   * interception logic. Edit the EXCLUDED list and regexes and leave the
+   * plumbing alone.
+   ***********************************************************************/
+
+  /**********************
+   * DEBUG
+   **********************/
+  const DEBUG = false;
+  const log = (...args) => { if (DEBUG) console.log("[X UNO]", ...args); };
+
+  /**********************
+   * SAFE LIST (NEVER TARGET)
+   * Use lowercase @handles without @.
+   **********************/
+  const EXCLUDED_HANDLES = new Set([
+    "your_username_here",
+  ].map(s => String(s).trim().replace(/^@/, "").toLowerCase()));
+
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const normHandle = (h) => norm(h).replace(/^@/, "");
+  const isExcluded = (h) => EXCLUDED_HANDLES.has(normHandle(h));
+
+  /**********************
+   * FILTERS
+   **********************/
+
+  // Handle patterns
+  const HANDLE_REGEXES = [
+    /(^|[._-])official($|[._-])/i,
+    /\bofficial\b/i,
+
+    /\.com\b/i,
+    /\.io\b/i,
+
+    /\bmarket\b/i,
+    /\bshop\b/i,
+    /\bstore\b/i,
+    /\boutlet\b/i,
+    /\bboutique\b/i,
+    /\bbrand\b/i,
+    /\bpromo\b/i,
+    /\bsale(s)?\b/i,
+    /\bdeal(s)?\b/i,
+    /\bdiscount(s)?\b/i,
+    /\bwholesale\b/i,
+    /\bmerch\b/i,
+    /\bproduct(s)?\b/i,
+
+    /\bcrypto\b/i,
+    /\bnft\b/i,
+    /\bforex\b/i,
+    /\bcasino\b/i,
+    /\bbet(s|ting)?\b/i,
+    /\bloan(s)?\b/i,
+    /\bfinance\b/i,
+    /\binvest(ing|ment)?\b/i,
+
+    // fake law enforcement bait
+    /\bpolice\b/i,
+    /\bcop(s)?\b/i,
+    /\bsheriff\b/i,
+    /\bdeputy\b/i,
+    /\btrooper\b/i,
+    /\bpatrol\b/i,
+    /\bbadge\b/i,
+    /\blaw[_-]?enforcement\b/i,
+    /\bthin\s*blue\s*line\b/i,
+  ];
+
+  // Religious bait in tweet text
+  const RELIGIOUS_REGEXES = [
+    /\bchristian\b/i,
+    /\bjesus\b/i,
+    /\bgod\b/i,
+    /\bblessed\b/i,
+    /\bbible\b/i,
+    /\bfaith\b/i,
+    /\bprayer\b/i,
+    /\bgospel\b/i,
+    /\bchurch\b/i,
+    /\bamen\b/i,
+    /#christian\b/i,
+    /#christiangirl\b/i,
+    /#christianboy\b/i,
+  ];
+
+  // General funnel/engagement bait in tweet text
+  const BAIT_REGEXES = [
+    /\blink in bio\b/i,
+    /\bcheck (my|the) bio\b/i,
+    /\bclick the link\b/i,
+    /\bdm (me|us)\b/i,
+    /\bmessage me\b/i,
+    /\bjoin my\b/i,
+    /\bsupporters?\b/i,
+    /\bcommunity\b/i,
+    /\bexclusive\b/i,
+    /\bsubscription\b/i,
+    /\bsubscribe\b/i,
+  ];
+
+  // Transition/identity monetization funnel (requires BOTH classes)
+  const TRANSITION_WORDS = [
+    /\btrans\b/i,
+    /\btransgirl\b/i,
+    /\btranswoman\b/i,
+    /\btransman\b/i,
+    /\btrans guy\b/i,
+    /\bmtf\b/i,
+    /\bftm\b/i,
+    /\bhrt\b/i,
+    /\bestrogen\b/i,
+    /\btestosterone\b/i,
+    /\btop surgery\b/i,
+    /\bbottom surgery\b/i,
+    /\bfacial feminization\b/i,
+    /\bffs\b/i,
+    /\btransition(ing|ed)?\b/i,
+  ];
+
+  const MONEY_CTA_WORDS = [
+    /\blink\b/i,
+    /\bdm (me|us)\b/i,
+    /\bsubscribe\b/i,
+    /\bexclusive\b/i,
+    /\bonlyfans\b/i,
+    /\bpatreon\b/i,
+    /\bgofundme\b/i,
+    /\bdonate\b/i,
+    /\bfund\b/i,
+    /\bcashapp\b/i,
+    /\bvenmo\b/i,
+    /\bpaypal\b/i,
+    /\btips?\b/i,
+  ];
+
+  const THIRST_FUNNEL_REGEXES = [
+    /\bbefore (and|&) after\b/i,
+    /\bglow up\b/i,
+    /\bmy (journey|story)\b/i,
+    /\bstay\b.*🥺/i,
+  ];
+
+  function matchesAny(text, regexes) {
+    const t = String(text || "");
+    return regexes.some(rx => rx.test(t));
+  }
+
+  function handleMatches(handle) {
+    const h = normHandle(handle);
+    if (!h) return false;
+    if (isExcluded(h)) return false;
+    return HANDLE_REGEXES.some(rx => rx.test(h));
+  }
+
+  function matchesTransitionFunnel(text) {
+    const t = String(text || "");
+    const hasTransition = TRANSITION_WORDS.some(rx => rx.test(t));
+    if (!hasTransition) return false;
+    const hasMoney = MONEY_CTA_WORDS.some(rx => rx.test(t));
+    if (!hasMoney) return false;
+    return true;
+  }
+
+  function shouldRemove(handle, text) {
+    if (!handle) return false;
+    if (isExcluded(handle)) return false;
+
+    if (handleMatches(handle)) return true;
+
+    if (matchesAny(text, RELIGIOUS_REGEXES)) return true;
+    if (matchesAny(text, BAIT_REGEXES)) return true;
+    if (matchesAny(text, THIRST_FUNNEL_REGEXES)) return true;
+    if (matchesTransitionFunnel(text)) return true;
+
+    return false;
+  }
+
+  /**********************
+   * ENDPOINTS TO INTERCEPT
+   * X uses a mix of GraphQL and internal API routes for timelines.
+   **********************/
+  const URL_ALLOWLIST = [
+    "/i/api/graphql",
+    "/graphql/",
+    "/2/timeline",
+    "/api/2/timeline",
+    "/i/api/2/",
+    "/i/api/1.1/",
+  ];
+
+  function shouldProcessUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      return URL_ALLOWLIST.some(part => u.pathname.includes(part));
+    } catch {
+      return URL_ALLOWLIST.some(part => String(url).includes(part));
+    }
+  }
+
+  /**********************
+   * EXTRACTORS FOR X JSON SHAPES
+   **********************/
+  function extractHandleFromUserObj(userObj) {
+    if (!userObj || typeof userObj !== "object") return null;
+
+    // Common:
+    if (typeof userObj.screen_name === "string") return userObj.screen_name;
+    if (typeof userObj.username === "string") return userObj.username;
+
+    // X legacy:
+    if (userObj.legacy && typeof userObj.legacy.screen_name === "string") return userObj.legacy.screen_name;
+
+    // GraphQL user_results:
+    const gql = userObj.user_results?.result;
+    if (gql?.legacy && typeof gql.legacy.screen_name === "string") return gql.legacy.screen_name;
+
+    // core.user_results variant:
+    const core = userObj.core?.user_results?.result;
+    if (core?.legacy && typeof core.legacy.screen_name === "string") return core.legacy.screen_name;
+
+    return null;
+  }
+
+  function extractTextFromTweetObj(tweetObj) {
+    if (!tweetObj || typeof tweetObj !== "object") return "";
+
+    // legacy full_text
+    if (tweetObj.legacy) {
+      if (typeof tweetObj.legacy.full_text === "string") return tweetObj.legacy.full_text;
+      if (typeof tweetObj.legacy.text === "string") return tweetObj.legacy.text;
+    }
+
+    // plain text
+    if (typeof tweetObj.full_text === "string") return tweetObj.full_text;
+    if (typeof tweetObj.text === "string") return tweetObj.text;
+
+    return "";
+  }
+
+  // Given a timeline "entry"/"item" object, try to find (handle, text) pairs.
+  function extractSignalFromEntry(entry) {
+    if (!entry || typeof entry !== "object") return { handle: null, text: "" };
+
+    // Many entries contain a "content" -> "itemContent" -> tweet_results
+    const tweet =
+      entry?.content?.itemContent?.tweet_results?.result ||
+      entry?.item?.itemContent?.tweet_results?.result ||
+      entry?.tweet_results?.result ||
+      entry?.content?.tweet_results?.result ||
+      null;
+
+    // Some are "tweet" wrapper objects, some are "Tweet" or "TweetWithVisibilityResults"
+    const tweetLegacy = tweet?.tweet?.legacy ? tweet.tweet : tweet;
+
+    const text = extractTextFromTweetObj(tweetLegacy);
+
+    // User can be in tweet.core.user_results
+    const user =
+      tweetLegacy?.core?.user_results?.result ||
+      tweetLegacy?.tweet?.core?.user_results?.result ||
+      tweetLegacy?.core?.user ||
+      null;
+
+    const handle =
+      extractHandleFromUserObj(user) ||
+      extractHandleFromUserObj(tweetLegacy?.core) ||
+      extractHandleFromUserObj(tweetLegacy?.tweet?.core) ||
+      null;
+
+    return { handle, text };
+  }
+
+  /**********************
+   * SCRUBBER
+   * Goal: remove timeline entries whose handle/text match.
+   * Also nukes obvious promoted entries if they match.
+   **********************/
+  function scrubXJson(json) {
+    if (!json || typeof json !== "object") return json;
+
+    // Most timelines show up under: data.home.home_timeline_urt.instructions
+    // or: data.user.result.timeline_v2.timeline.instructions
+    // or: data.threaded_conversation_with_injections_v2.instructions
+    const instructionPaths = [
+      ["data", "home", "home_timeline_urt", "instructions"],
+      ["data", "home", "home_timeline_urt", "response", "instructions"],
+      ["data", "user", "result", "timeline_v2", "timeline", "instructions"],
+      ["data", "user", "result", "timeline", "timeline", "instructions"],
+      ["data", "threaded_conversation_with_injections_v2", "instructions"],
+      ["data", "search_by_raw_query", "search_timeline", "timeline", "instructions"],
+      ["timeline", "instructions"],
+    ];
+
+    function getAtPath(obj, path) {
+      let cur = obj;
+      for (const k of path) {
+        if (!cur || typeof cur !== "object") return null;
+        cur = cur[k];
+      }
+      return cur;
+    }
+
+    function setAtPath(obj, path, value) {
+      let cur = obj;
+      for (let i = 0; i < path.length - 1; i++) {
+        const k = path[i];
+        if (!cur[k] || typeof cur[k] !== "object") return false;
+        cur = cur[k];
+      }
+      cur[path[path.length - 1]] = value;
+      return true;
+    }
+
+    let touched = false;
+
+    for (const path of instructionPaths) {
+      const instructions = getAtPath(json, path);
+      if (!Array.isArray(instructions)) continue;
+
+      const newInstructions = instructions.map(inst => {
+        try {
+          // Entries often live under: inst.entries
+          // or: inst.addEntries.entries
+          const entries =
+            inst?.entries ||
+            inst?.addEntries?.entries ||
+            null;
+
+          if (!Array.isArray(entries)) return inst;
+
+          const filtered = entries.filter(entry => {
+            const { handle, text } = extractSignalFromEntry(entry);
+
+            // Some entries are "promoted" or "who to follow" etc. handle can be null.
+            if (handle && shouldRemove(handle, text)) {
+              log("Removed entry:", handle, "|", (text || "").slice(0, 60));
+              return false;
+            }
+
+            // Also catch entries where the text exists but handle extraction fails:
+            // If it's very obviously bait (rare), remove anyway.
+            if (!handle && text) {
+              const strongTextHit =
+                matchesAny(text, RELIGIOUS_REGEXES) ||
+                matchesAny(text, BAIT_REGEXES) ||
+                matchesAny(text, THIRST_FUNNEL_REGEXES) ||
+                matchesTransitionFunnel(text);
+
+              if (strongTextHit) {
+                log("Removed entry by text-only hit");
+                return false;
+              }
+            }
+
+            return true;
+          });
+
+          if (filtered.length !== entries.length) touched = true;
+
+          // Reattach entries in the same shape
+          if (inst.entries) return { ...inst, entries: filtered };
+          if (inst.addEntries?.entries) return { ...inst, addEntries: { ...inst.addEntries, entries: filtered } };
+          return inst;
+        } catch {
+          return inst;
+        }
+      });
+
+      if (touched) setAtPath(json, path, newInstructions);
+    }
+
+    return json;
+  }
+
+  /**********************
+   * FETCH INTERCEPT
+   **********************/
+  const realFetch = window.fetch;
+  window.fetch = async function(input, init) {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+
+    if (!shouldProcessUrl(url)) {
+      return realFetch.apply(this, arguments);
+    }
+
+    const resp = await realFetch.apply(this, arguments);
+
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      return resp;
+    }
+
+    try {
+      const cloned = resp.clone();
+      const text = await cloned.text();
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return resp;
+      }
+
+      const scrubbed = scrubXJson(json);
+      const newBody = JSON.stringify(scrubbed);
+
+      log("Filtered fetch response:", url);
+
+      return new Response(newBody, {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: resp.headers,
+      });
+    } catch (e) {
+      log("Fetch filter error; returning original:", e);
+      return resp;
+    }
+  };
+
+  /**********************
+   * XHR INTERCEPT (FALLBACK)
+   **********************/
+  const RealXHR = window.XMLHttpRequest;
+
+  function PatchedXHR() {
+    const xhr = new RealXHR();
+    let requestUrl = "";
+
+    const realOpen = xhr.open;
+    xhr.open = function(method, url) {
+      requestUrl = url || "";
+      return realOpen.apply(this, arguments);
+    };
+
+    const realSend = xhr.send;
+    xhr.send = function() {
+      if (!shouldProcessUrl(requestUrl)) {
+        return realSend.apply(this, arguments);
+      }
+
+      const origOnReady = xhr.onreadystatechange;
+
+      xhr.onreadystatechange = function() {
+        try {
+          if (xhr.readyState === 4) {
+            const ct = xhr.getResponseHeader("content-type") || "";
+            if (ct.includes("application/json")) {
+              let json;
+              try {
+                json = JSON.parse(xhr.responseText);
+              } catch {
+                json = null;
+              }
+
+              if (json) {
+                const scrubbed = scrubXJson(json);
+                const newTxt = JSON.stringify(scrubbed);
+
+                try { Object.defineProperty(xhr, "responseText", { get: () => newTxt }); } catch {}
+                try { Object.defineProperty(xhr, "response", { get: () => newTxt }); } catch {}
+
+                log("Filtered XHR response:", requestUrl);
+              }
+            }
+          }
+        } catch (e) {
+          log("XHR filter error:", e);
+        }
+
+        if (origOnReady) return origOnReady.apply(this, arguments);
+      };
+
+      return realSend.apply(this, arguments);
+    };
+
+    return xhr;
+  }
+
+  window.XMLHttpRequest = PatchedXHR;
+
+  log("Loaded. X will now receive a slightly less cursed reality.");
+})();
