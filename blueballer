@@ -1,0 +1,266 @@
+// ==UserScript==
+// @name         Bluesky Uno-Reverse Feed Filter (fetch interception)
+// @namespace    local
+// @version      1.0.0
+// @description  Intercepts Bluesky XRPC JSON and removes posts from matched accounts before the UI can render them.
+// @match        https://bsky.app/*
+// @run-at       document-start
+// @grant        none
+// ==/UserScript==
+
+(() => {
+  "use strict";
+
+  /***********************************************************************
+   *  HI. READ THIS.
+   *
+   *  This script intercepts network responses and edits JSON in-flight.
+   *  Which means it is not "a theme" or "a cute little plugin".
+   *  It is you politely grabbing the steering wheel from the internet.
+   *
+   *  If you don't understand fetch interception and JSON scrubbing,
+   *  do NOT start "tweaking stuff" because you got curious.
+   *  Curiosity is how humanity invented both ransomware and sparkling water.
+   ***********************************************************************/
+
+  /**********************
+   * USER SETTINGS
+   **********************/
+
+  // Accounts you NEVER want to target. Put your own handle here.
+  // Use lowercase handles, without the leading @.
+  const EXCLUDED_HANDLES = new Set([
+    "your_username_here", // change to your Bluesky handle if needed
+  ].map(s => s.toLowerCase()));
+
+  // Handles / names we consider "not here for vibes".
+  // Yes this is aggressive. No, I’m not sorry.
+  const HANDLE_REGEXES = [
+    // “official” bait (including _official, .official, -official)
+    /(^|[._-])official($|[._-])/i,
+    /\bofficial\b/i,
+
+    // Domains
+    /\.com\b/i,
+    /\.io\b/i,
+
+    // Selling / commerce
+    /\bmarket\b/i,
+    /\bshop\b/i,
+    /\bstore\b/i,
+    /\boutlet\b/i,
+    /\bboutique\b/i,
+    /\bbrand\b/i,
+    /\bpromo\b/i,
+    /\bsales?\b/i,
+    /\bdeals?\b/i,
+    /\bdiscounts?\b/i,
+    /\bwholesale\b/i,
+    /\bmerch\b/i,
+    /\bproducts?\b/i,
+
+    // Corporate cosplay
+    /\b(inc|llc|ltd|gmbh|co)\b/i,
+
+    // Police / law enforcement thirst-trap industrial complex
+    /\bpolice\b/i,
+    /\bcop(s)?\b/i,
+    /\bsheriff\b/i,
+    /\bdeputy\b/i,
+    /\btrooper\b/i,
+    /\bpatrol\b/i,
+    /\bbadge\b/i,
+    /\blaw[_-]?enforcement\b/i,
+    /\bthin\s*blue\s*line\b/i,
+  ];
+
+  // Optional: scan post text too (more false positives, more power)
+  const ALSO_FILTER_BY_POST_TEXT = true;
+  const POST_TEXT_REGEXES = [
+    /\blink in bio\b/i,
+    /\bdm (me|us)\b/i,
+    /\bdm to (buy|order)\b/i,
+    /\bbuy now\b/i,
+    /\border now\b/i,
+    /\bavailable now\b/i,
+    /\bfree shipping\b/i,
+    /\bpromo code\b/i,
+    /\bshop now\b/i,
+  ];
+
+  // XRPC endpoints we mess with. We do NOT intercept everything because we’re chaotic, not stupid.
+  const URL_ALLOWLIST = [
+    "/xrpc/app.bsky.feed.getTimeline",
+    "/xrpc/app.bsky.feed.getFeed",
+    "/xrpc/app.bsky.feed.getAuthorFeed",
+    "/xrpc/app.bsky.feed.getListFeed",
+    "/xrpc/app.bsky.feed.searchPosts",
+  ];
+
+  const DEBUG = false;
+  const log = (...args) => { if (DEBUG) console.log("[BSKY UnoReverse]", ...args); };
+
+  /**********************
+   * HELPERS
+   **********************/
+  function normalizeHandle(h) {
+    return String(h || "").trim().replace(/^@/, "").toLowerCase();
+  }
+
+  function isExcluded(handle) {
+    return EXCLUDED_HANDLES.has(normalizeHandle(handle));
+  }
+
+  function handleMatches(handle) {
+    const h = normalizeHandle(handle);
+    if (!h) return false;
+    if (isExcluded(h)) return false;
+    return HANDLE_REGEXES.some(rx => rx.test(h));
+  }
+
+  function postTextMatches(text) {
+    if (!ALSO_FILTER_BY_POST_TEXT) return false;
+    const t = String(text || "");
+    return POST_TEXT_REGEXES.some(rx => rx.test(t));
+  }
+
+  function shouldProcessUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      return URL_ALLOWLIST.some(part => u.pathname.includes(part));
+    } catch {
+      return URL_ALLOWLIST.some(part => String(url).includes(part));
+    }
+  }
+
+  /***********************************************************************
+   * JSON SCRUBBER
+   *
+   * Bluesky feed responses typically look like:
+   *   { feed: [ { post: { author: { handle }, record: { text } }, ... } ], cursor: "..." }
+   *
+   * We delete feed entries where author.handle matches our filters,
+   * and optionally where post text matches CTA patterns.
+   ***********************************************************************/
+  function scrubXrpcJson(json) {
+    if (!json || typeof json !== "object") return json;
+
+    // Most feed endpoints return { feed: [...] }
+    if (Array.isArray(json.feed)) {
+      const before = json.feed.length;
+
+      json.feed = json.feed.filter(item => {
+        try {
+          const handle =
+            item?.post?.author?.handle ||
+            item?.reason?.by?.handle ||
+            item?.reply?.parent?.author?.handle ||
+            item?.reply?.root?.author?.handle ||
+            "";
+
+          const text =
+            item?.post?.record?.text ||
+            item?.post?.record?.value?.text ||
+            item?.post?.record?.value?.content?.text ||
+            "";
+
+          if (handleMatches(handle)) {
+            log("Deleted feed item from:", handle);
+            return false;
+          }
+
+          if (postTextMatches(text)) {
+            // Text-based filtering can be harsh; it’s optional for a reason.
+            log("Deleted feed item by text match (author):", handle);
+            return false;
+          }
+
+          return true;
+        } catch {
+          return true;
+        }
+      });
+
+      const after = json.feed.length;
+      if (before !== after) log(`Feed scrubbed: ${before} -> ${after}`);
+    }
+
+    // Some endpoints return { posts: [...] } (search)
+    if (Array.isArray(json.posts)) {
+      const before = json.posts.length;
+
+      json.posts = json.posts.filter(p => {
+        const handle = p?.author?.handle || "";
+        const text = p?.record?.text || "";
+        if (handleMatches(handle)) {
+          log("Deleted search post from:", handle);
+          return false;
+        }
+        if (postTextMatches(text)) {
+          log("Deleted search post by text match (author):", handle);
+          return false;
+        }
+        return true;
+      });
+
+      const after = json.posts.length;
+      if (before !== after) log(`Posts scrubbed: ${before} -> ${after}`);
+    }
+
+    return json;
+  }
+
+  /***********************************************************************
+   * FETCH INTERCEPT
+   *
+   * We override window.fetch at document-start so the app boots into our
+   * version of reality, not the one with AI cop thirst traps.
+   ***********************************************************************/
+  const realFetch = window.fetch;
+
+  window.fetch = async function(input, init) {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+
+    if (!shouldProcessUrl(url)) {
+      return realFetch.apply(this, arguments);
+    }
+
+    const resp = await realFetch.apply(this, arguments);
+
+    // Only touch JSON
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return resp;
+    }
+
+    try {
+      const cloned = resp.clone();
+      const text = await cloned.text();
+
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // Not JSON? Then it's not our circus.
+        return resp;
+      }
+
+      const scrubbed = scrubXrpcJson(json);
+      const newBody = JSON.stringify(scrubbed);
+
+      log("Filtered XRPC response:", url);
+
+      // Rebuild Response (same status, same headers)
+      return new Response(newBody, {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: resp.headers,
+      });
+    } catch (e) {
+      log("Filter error; returning original response:", e);
+      return resp;
+    }
+  };
+
+  log("Loaded. The feed is now marginally less awful. You're welcome.");
+})();
