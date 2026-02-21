@@ -11,7 +11,7 @@ These work by injecting into the browser and filtering *before* the social apps 
 Intercepts Instagram’s network responses and strips out posts from:
 
 * commercial handles (.com / .io / shop / market / etc.)
-* “official” accounts (except `zoeykl_official`, of course)
+* “official” accounts (except `your_username_here`, of course)
 * AI-generated police/law enforcement thirst traps
 
 … before the page UI ever sees them.
