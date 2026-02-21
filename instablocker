@@ -34,7 +34,7 @@
    * EXCLUDED USERNAMES (SAFE LIST)
    **************************************************************/
   const EXCLUDED_USERNAMES = new Set([
-    "zoeykl_official"
+    "your_username_here"
   ].map(x => x.toLowerCase()));
 
   function normalize(str) {
@@ -53,6 +53,7 @@
     // official bait
     /(^|[._-])official($|[._-])/i,
     /\bofficial\b/i,
+    /\.ai\b/i,
 
     // domains
     /\.com\b/i,
