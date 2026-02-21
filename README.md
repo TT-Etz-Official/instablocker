@@ -4,6 +4,63 @@ Because the modern feed is a landfill and I got tired of manually blocking AI-ge
 
 This userscript intercepts Instagram’s network responses and removes unwanted accounts **before the UI ever sees them**. They simply never existed. ✨
 
+## 📦 How to Install
+
+### 🧠 What You’re Installing
+
+Tampermonkey is a userscript manager extension that lets your browser run custom scripts like this one. You’ll need it before you can use the block-filter script below. ([Tampermonkey][1])
+
+---
+
+### 🔵 Google Chrome
+
+1. Open Chrome.
+2. Visit the **Tampermonkey extension page** on the Chrome Web Store. ([Chrome Web Store][2])
+3. Click **“Add to Chrome”** and confirm.
+4. Once installed, a Tampermonkey icon will appear to the right of the address bar.
+5. Click that icon, open **Dashboard**, then **Add new script**.
+6. Paste your userscript code into the editor and save.
+
+---
+
+### 🌀 Opera
+
+1. Open Opera.
+2. Search for **Tampermonkey in the Opera Add-ons store** (or go via Tampermonkey.net). ([Opera add-ons][3])
+3. Click **“Add to Opera”** and confirm installation.
+4. After installation, the Tampermonkey icon will appear near the address bar.
+5. Open the Dashboard, add a new script, and paste your code.
+
+> *Note:* On some versions of Opera, installing the “Chrome Extensions” add-on first can make installing Chrome extensions (including Tampermonkey) easier. ([openuserjs.org][4])
+
+---
+
+### 🦊 Mozilla Firefox
+
+1. Open Firefox.
+2. Go to the **Tampermonkey add-on page for Firefox** and click **“Add to Firefox”**. ([Mozilla Add-ons][5])
+3. Approve the extension permissions.
+4. See the Tampermonkey icon appear in your toolbar.
+5. Click it, choose **Dashboard**, then **Add new script**.
+6. Paste your userscript code and save.
+
+---
+
+### 🧠 After Installation
+
+Once Tampermonkey is installed and your script is saved:
+
+* Ensure the script is **enabled** in the Tampermonkey dashboard.
+* Visit Instagram in the same browser — the script will begin working automatically.
+* You can return to the dashboard to **edit, disable, or remove** the script any time.
+
+[1]: https://www.tampermonkey.net/?utm_source=chatgpt.com "Tampermonkey: Home"
+[2]: https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en&utm_source=chatgpt.com "Tampermonkey - Chrome Web Store"
+[3]: https://addons.opera.com/en/extensions/details/tampermonkey-beta/?utm_source=chatgpt.com "Tampermonkey extension - Opera add-ons"
+[4]: https://openuserjs.org/about/Tampermonkey-for-Opera?utm_source=chatgpt.com "About / Tampermonkey for Opera"
+[5]: https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/?utm_source=chatgpt.com "Tampermonkey – Get this Extension for Firefox (en-US)"
+
+
 ---
 
 ## What This Does
