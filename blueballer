@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Bluesky Uno-Reverse Feed Filter (fetch interception)
+// @name         Bluesky Uno-Reverse Feed Filter (Full Intercept + Aggressive Bait Filters)
 // @namespace    local
-// @version      1.0.0
-// @description  Intercepts Bluesky XRPC JSON and removes posts from matched accounts before the UI can render them.
+// @version      2.0.0
+// @description  Intercepts Bluesky XRPC JSON (fetch + XHR) and removes matched posts before the UI can render them.
 // @match        https://bsky.app/*
 // @run-at       document-start
 // @grant        none
@@ -12,39 +12,57 @@
   "use strict";
 
   /***********************************************************************
-   *  HI. READ THIS.
+   * READ THIS BEFORE YOU TOUCH THINGS
    *
-   *  This script intercepts network responses and edits JSON in-flight.
-   *  Which means it is not "a theme" or "a cute little plugin".
-   *  It is you politely grabbing the steering wheel from the internet.
+   * This script intercepts network responses and mutates JSON in-flight.
+   * That means you're editing what Bluesky RECEIVES, not just hiding UI.
    *
-   *  If you don't understand fetch interception and JSON scrubbing,
-   *  do NOT start "tweaking stuff" because you got curious.
-   *  Curiosity is how humanity invented both ransomware and sparkling water.
+   * If you don't understand:
+   *   - fetch interception
+   *   - XHR patching
+   *   - JSON scrubbing
+   *
+   * Then congratulations, you are the average person on the internet —
+   * and you should only edit the EXCLUDED list + maybe regex lists.
    ***********************************************************************/
 
   /**********************
-   * USER SETTINGS
+   * DEBUG / TUNING
+   **********************/
+  const DEBUG = false;
+  const log = (...args) => { if (DEBUG) console.log("[BSKY UNO]", ...args); };
+
+  // If true: also filter based on post text. (More power, more false positives.)
+  const ALSO_FILTER_BY_POST_TEXT = true;
+
+  /**********************
+   * SAFE LIST (NEVER TARGET)
+   * Put your own handle(s) here, lowercase, without leading @.
+   **********************/
+  const EXCLUDED_HANDLES = new Set([
+    // Replace with your Bluesky handle if different:
+    "your_username_here",
+  ].map(s => String(s).trim().replace(/^@/, "").toLowerCase()));
+
+  const normalizeHandle = (h) => String(h || "").trim().replace(/^@/, "").toLowerCase();
+  const isExcluded = (h) => EXCLUDED_HANDLES.has(normalizeHandle(h));
+
+  /**********************
+   * FILTERS
    **********************/
 
-  // Accounts you NEVER want to target. Put your own handle here.
-  // Use lowercase handles, without the leading @.
-  const EXCLUDED_HANDLES = new Set([
-    "your_username_here", // change to your Bluesky handle if needed
-  ].map(s => s.toLowerCase()));
-
-  // Handles / names we consider "not here for vibes".
-  // Yes this is aggressive. No, I’m not sorry.
+  // Handle/username patterns (reliable-ish)
   const HANDLE_REGEXES = [
-    // “official” bait (including _official, .official, -official)
+    // "official" bait (including _official, .official, -official)
     /(^|[._-])official($|[._-])/i,
     /\bofficial\b/i,
 
-    // Domains
+    // domains
     /\.com\b/i,
     /\.io\b/i,
+    /\.ai\b/i,
 
-    // Selling / commerce
+    // commerce
     /\bmarket\b/i,
     /\bshop\b/i,
     /\bstore\b/i,
@@ -52,17 +70,24 @@
     /\bboutique\b/i,
     /\bbrand\b/i,
     /\bpromo\b/i,
-    /\bsales?\b/i,
-    /\bdeals?\b/i,
-    /\bdiscounts?\b/i,
+    /\bsale(s)?\b/i,
+    /\bdeal(s)?\b/i,
+    /\bdiscount(s)?\b/i,
     /\bwholesale\b/i,
     /\bmerch\b/i,
-    /\bproducts?\b/i,
+    /\bproduct(s)?\b/i,
 
-    // Corporate cosplay
-    /\b(inc|llc|ltd|gmbh|co)\b/i,
+    // spam verticals
+    /\bcrypto\b/i,
+    /\bnft\b/i,
+    /\bforex\b/i,
+    /\bcasino\b/i,
+    /\bbet(s|ting)?\b/i,
+    /\bloan(s)?\b/i,
+    /\bfinance\b/i,
+    /\binvest(ing|ment)?\b/i,
 
-    // Police / law enforcement thirst-trap industrial complex
+    // fake law enforcement thirst/funnel pages
     /\bpolice\b/i,
     /\bcop(s)?\b/i,
     /\bsheriff\b/i,
@@ -74,41 +99,93 @@
     /\bthin\s*blue\s*line\b/i,
   ];
 
-  // Optional: scan post text too (more false positives, more power)
-  const ALSO_FILTER_BY_POST_TEXT = true;
-  const POST_TEXT_REGEXES = [
+  // Religious bait in post text / tags
+  const RELIGIOUS_REGEXES = [
+    /\bchristian\b/i,
+    /\bjesus\b/i,
+    /\bgod\b/i,
+    /\bblessed\b/i,
+    /\bbible\b/i,
+    /\bfaith\b/i,
+    /\bprayer\b/i,
+    /\bgospel\b/i,
+    /\bchurch\b/i,
+    /\bamen\b/i,
+    /#christian\b/i,
+    /#christiangirl\b/i,
+    /#christianboy\b/i,
+  ];
+
+  // General engagement bait / funnel language
+  const BAIT_REGEXES = [
+    /\blink in bio\b/i,
+    /\bcheck (my|the) bio\b/i,
+    /\bclick the link\b/i,
+    /\bdm (me|us)\b/i,
+    /\bmessage me\b/i,
+    /\bcome find me\b/i,
+    /\bwaiting for you\b/i,
+    /\bplease stay\b/i,
+    /\blose followers\b/i,
+    /\bevery time i post\b/i,
+    /\bi can'?t reply to everyone\b/i,
+    /\bjoin my\b/i,
+    /\bsupporters?\b/i,
+    /\bcommunity\b/i,
+    /\bexclusive\b/i,
+    /\bsubscription\b/i,
+    /\bsubscribe\b/i,
+  ];
+
+  // Transition/identity words (for funnel detection — not a standalone ban)
+  const TRANSITION_WORDS = [
+    /\btrans\b/i,
+    /\btransgirl\b/i,
+    /\btranswoman\b/i,
+    /\btrans guy\b/i,
+    /\btransman\b/i,
+    /\bmtf\b/i,
+    /\bftm\b/i,
+    /\bhrt\b/i,
+    /\bestrogen\b/i,
+    /\btestosterone\b/i,
+    /\btop surgery\b/i,
+    /\bbottom surgery\b/i,
+    /\bfacial feminization\b/i,
+    /\bffs\b/i,
+    /\btransition(ing|ed)?\b/i,
+  ];
+
+  // Money / CTA words (for funnel detection)
+  const MONEY_CTA_WORDS = [
+    /\blink\b/i,
     /\blink in bio\b/i,
     /\bdm (me|us)\b/i,
-    /\bdm to (buy|order)\b/i,
-    /\bbuy now\b/i,
-    /\border now\b/i,
-    /\bavailable now\b/i,
-    /\bfree shipping\b/i,
-    /\bpromo code\b/i,
-    /\bshop now\b/i,
+    /\bsubscribe\b/i,
+    /\bexclusive\b/i,
+    /\bonlyfans\b/i,
+    /\bpatreon\b/i,
+    /\bgofundme\b/i,
+    /\bdonate\b/i,
+    /\bfund\b/i,
+    /\bcashapp\b/i,
+    /\bvenmo\b/i,
+    /\bpaypal\b/i,
+    /\btips?\b/i,
   ];
 
-  // XRPC endpoints we mess with. We do NOT intercept everything because we’re chaotic, not stupid.
-  const URL_ALLOWLIST = [
-    "/xrpc/app.bsky.feed.getTimeline",
-    "/xrpc/app.bsky.feed.getFeed",
-    "/xrpc/app.bsky.feed.getAuthorFeed",
-    "/xrpc/app.bsky.feed.getListFeed",
-    "/xrpc/app.bsky.feed.searchPosts",
+  // Extra thirst/funnel patterns
+  const THIRST_FUNNEL_REGEXES = [
+    /\bbefore (and|&) after\b/i,
+    /\bglow up\b/i,
+    /\bmy (journey|story)\b/i,
+    /\bi'?m just a (girl|boy)\b/i,
+    /\bstay\b.*🥺/i,
   ];
 
-  const DEBUG = false;
-  const log = (...args) => { if (DEBUG) console.log("[BSKY UnoReverse]", ...args); };
-
-  /**********************
-   * HELPERS
-   **********************/
-  function normalizeHandle(h) {
-    return String(h || "").trim().replace(/^@/, "").toLowerCase();
-  }
-
-  function isExcluded(handle) {
-    return EXCLUDED_HANDLES.has(normalizeHandle(handle));
+  function matchesAny(text, regexes) {
+    const t = String(text || "");
+    return regexes.some(rx => rx.test(t));
   }
 
   function handleMatches(handle) {
@@ -118,11 +195,49 @@
     return HANDLE_REGEXES.some(rx => rx.test(h));
   }
 
-  function postTextMatches(text) {
-    if (!ALSO_FILTER_BY_POST_TEXT) return false;
+  function matchesTransitionFunnel(text) {
     const t = String(text || "");
-    return POST_TEXT_REGEXES.some(rx => rx.test(t));
+    const hasTransition = TRANSITION_WORDS.some(rx => rx.test(t));
+    if (!hasTransition) return false;
+
+    const hasMoney = MONEY_CTA_WORDS.some(rx => rx.test(t));
+    if (!hasMoney) return false;
+
+    return true;
   }
+
+  function shouldRemove(handle, text) {
+    if (!handle) return false;
+    if (isExcluded(handle)) return false;
+
+    // Handle-based nukes
+    if (handleMatches(handle)) return true;
+
+    // Text-based nukes
+    if (ALSO_FILTER_BY_POST_TEXT) {
+      if (matchesAny(text, RELIGIOUS_REGEXES)) return true;
+      if (matchesAny(text, BAIT_REGEXES)) return true;
+      if (matchesAny(text, THIRST_FUNNEL_REGEXES)) return true;
+
+      // Funnel behavior (requires both kinds of signals)
+      if (matchesTransitionFunnel(text)) return true;
+    }
+
+    return false;
+  }
+
+  /**********************
+   * ENDPOINT ALLOWLIST
+   * We only touch feed-ish endpoints so we don't brick unrelated UI.
+   **********************/
+  const URL_ALLOWLIST = [
+    "/xrpc/app.bsky.feed.getTimeline",
+    "/xrpc/app.bsky.feed.getFeed",
+    "/xrpc/app.bsky.feed.getAuthorFeed",
+    "/xrpc/app.bsky.feed.getListFeed",
+    "/xrpc/app.bsky.feed.searchPosts",
+    "/xrpc/app.bsky.feed.getPostThread",
+  ];
 
   function shouldProcessUrl(url) {
     try {
@@ -133,19 +248,13 @@
     }
   }
 
-  /***********************************************************************
-   * JSON SCRUBBER
-   *
-   * Bluesky feed responses typically look like:
-   *   { feed: [ { post: { author: { handle }, record: { text } }, ... } ], cursor: "..." }
-   *
-   * We delete feed entries where author.handle matches our filters,
-   * and optionally where post text matches CTA patterns.
-   ***********************************************************************/
+  /**********************
+   * SCRUBBER: Bluesky JSON shapes
+   **********************/
   function scrubXrpcJson(json) {
     if (!json || typeof json !== "object") return json;
 
-    // Most feed endpoints return { feed: [...] }
+    // Feed endpoints: { feed: [ { post: { author: { handle }, record: { text } } } ] }
     if (Array.isArray(json.feed)) {
       const before = json.feed.length;
 
@@ -164,17 +273,10 @@
             item?.post?.record?.value?.content?.text ||
             "";
 
-          if (handleMatches(handle)) {
-            log("Deleted feed item from:", handle);
+          if (shouldRemove(handle, text)) {
+            log("Removed feed item:", handle);
             return false;
           }
-
-          if (postTextMatches(text)) {
-            // Text-based filtering can be harsh; it’s optional for a reason.
-            log("Deleted feed item by text match (author):", handle);
-            return false;
-          }
-
           return true;
         } catch {
           return true;
@@ -185,37 +287,70 @@
       if (before !== after) log(`Feed scrubbed: ${before} -> ${after}`);
     }
 
-    // Some endpoints return { posts: [...] } (search)
+    // Search endpoint: { posts: [ { author: { handle }, record: { text } } ] }
     if (Array.isArray(json.posts)) {
       const before = json.posts.length;
 
       json.posts = json.posts.filter(p => {
-        const handle = p?.author?.handle || "";
-        const text = p?.record?.text || "";
-        if (handleMatches(handle)) {
-          log("Deleted search post from:", handle);
-          return false;
+        try {
+          const handle = p?.author?.handle || "";
+          const text = p?.record?.text || "";
+          if (shouldRemove(handle, text)) {
+            log("Removed search post:", handle);
+            return false;
+          }
+          return true;
+        } catch {
+          return true;
         }
-        if (postTextMatches(text)) {
-          log("Deleted search post by text match (author):", handle);
-          return false;
-        }
-        return true;
       });
 
       const after = json.posts.length;
       if (before !== after) log(`Posts scrubbed: ${before} -> ${after}`);
     }
 
+    // Thread endpoint can include nested replies; best-effort scrub
+    if (json.thread && typeof json.thread === "object") {
+      const seen = new WeakSet();
+
+      const walk = (node) => {
+        if (!node || typeof node !== "object") return node;
+        if (seen.has(node)) return node;
+        seen.add(node);
+
+        // A thread node often looks like { post: { author, record }, replies: [...] }
+        const handle = node?.post?.author?.handle || "";
+        const text = node?.post?.record?.text || "";
+
+        if (handle && shouldRemove(handle, text)) {
+          log("Neutered thread node:", handle);
+          return null;
+        }
+
+        if (Array.isArray(node.replies)) {
+          node.replies = node.replies
+            .map(walk)
+            .filter(x => x !== null);
+        }
+
+        // Walk other keys too, cautiously
+        for (const k of Object.keys(node)) {
+          if (k === "replies") continue;
+          node[k] = walk(node[k]);
+        }
+
+        return node;
+      };
+
+      json.thread = walk(json.thread);
+    }
+
     return json;
   }
 
-  /***********************************************************************
+  /**********************
    * FETCH INTERCEPT
-   *
-   * We override window.fetch at document-start so the app boots into our
-   * version of reality, not the one with AI cop thirst traps.
-   ***********************************************************************/
+   **********************/
   const realFetch = window.fetch;
 
   window.fetch = async function(input, init) {
@@ -227,9 +362,8 @@
 
     const resp = await realFetch.apply(this, arguments);
 
-    // Only touch JSON
-    const contentType = resp.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
       return resp;
     }
 
@@ -241,26 +375,89 @@
       try {
         json = JSON.parse(text);
       } catch {
-        // Not JSON? Then it's not our circus.
         return resp;
       }
 
       const scrubbed = scrubXrpcJson(json);
       const newBody = JSON.stringify(scrubbed);
 
-      log("Filtered XRPC response:", url);
+      log("Filtered fetch response:", url);
 
-      // Rebuild Response (same status, same headers)
       return new Response(newBody, {
         status: resp.status,
         statusText: resp.statusText,
         headers: resp.headers,
       });
     } catch (e) {
-      log("Filter error; returning original response:", e);
+      log("Fetch filter error; returning original:", e);
       return resp;
     }
   };
 
-  log("Loaded. The feed is now marginally less awful. You're welcome.");
+  /**********************
+   * XHR INTERCEPT (FALLBACK)
+   **********************/
+  const RealXHR = window.XMLHttpRequest;
+
+  function PatchedXHR() {
+    const xhr = new RealXHR();
+    let requestUrl = "";
+
+    const realOpen = xhr.open;
+    xhr.open = function(method, url) {
+      requestUrl = url || "";
+      return realOpen.apply(this, arguments);
+    };
+
+    const realSend = xhr.send;
+    xhr.send = function() {
+      if (!shouldProcessUrl(requestUrl)) {
+        return realSend.apply(this, arguments);
+      }
+
+      const origOnReady = xhr.onreadystatechange;
+
+      xhr.onreadystatechange = function() {
+        try {
+          if (xhr.readyState === 4) {
+            const ct = xhr.getResponseHeader("content-type") || "";
+            if (ct.includes("application/json")) {
+              let json;
+              try {
+                json = JSON.parse(xhr.responseText);
+              } catch {
+                json = null;
+              }
+
+              if (json) {
+                const scrubbed = scrubXrpcJson(json);
+                const newTxt = JSON.stringify(scrubbed);
+
+                try {
+                  Object.defineProperty(xhr, "responseText", { get: () => newTxt });
+                } catch {}
+                try {
+                  Object.defineProperty(xhr, "response", { get: () => newTxt });
+                } catch {}
+
+                log("Filtered XHR response:", requestUrl);
+              }
+            }
+          }
+        } catch (e) {
+          log("XHR filter error:", e);
+        }
+
+        if (origOnReady) return origOnReady.apply(this, arguments);
+      };
+
+      return realSend.apply(this, arguments);
+    };
+
+    return xhr;
+  }
+
+  window.XMLHttpRequest = PatchedXHR;
+
+  log("Loaded. Your feed is now running through a very judgmental sieve.");
 })();
