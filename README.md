@@ -4,6 +4,16 @@ A pair of *ruthlessly judgmental* userscripts that intercept social media feeds 
 
 These work by injecting into the browser and filtering *before* the social apps ever get a chance to show you garbage. If you don’t understand what XHR/fetch interception is, don’t touch this — the code bites if you poke it with a stick.
 
+This should also help you fix your algorithm:
+
+If the client never renders the item, and therefore never fires the client-side impression / visibility / dwell-time events tied to that object ID… then from the ranking system’s perspective, that item effectively did not generate exposure feedback.
+
+Update: added bluesky variant, both scripts mostly just remove AI content, engagement bait, fake funding, crypto plugs, etc quite aggressively. You should see a COMPLETELY different part of the algorithm now.
+
+I noticed my feed change DRASTICALLY when removing certain content, went from mostly racist tshirt ads, videos of people harassing Jews, and AI thirst traps, and changed to gun stuff, car stuff, pranks, and scripted KFC vegan karen videos
+
+Instagram’s feed isn’t “what you follow” so much as “what its ranking model thinks will keep you there,” and when you start deleting whole categories of posts before the app can even register them, you basically yank out huge chunks of the model’s feedback signal.
+
 ## 📦 What You’re Getting
 
 ### 🧨 Instagram Uno-Reverse Filter
