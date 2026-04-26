@@ -71,6 +71,7 @@
     /\bwholesale\b/i,
     /\bmerch\b/i,
     /\bproduct(s)?\b/i,
+    /\eric_hexter,
 
     // spam verticals
     /\bcrypto\b/i,
